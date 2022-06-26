@@ -1,7 +1,8 @@
 const path = require("path");
 const HtmlWebpackPlugin = require("html-webpack-plugin");
+const HtmlWebpackHarddiskPlugin = require("html-webpack-harddisk-plugin");
 const webpack = require("webpack");
-//const ssr = require("./ssr");
+const ssr = require("./ssr");
 module.exports = {
 	mode: "development",
 	entry: "./src/index.js",
@@ -11,16 +12,10 @@ module.exports = {
 	},
 	plugins: [
 		new HtmlWebpackPlugin({
-			templateContent: `<!DOCTYPE html>
-<html>
-	<head>
-		<meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width">
-		<title>PureScript Blog</title>
-	</head>
-  <body></body>
-</html>`, //ssr.ssr(),
+			alwaysWriteToDisk: true,
+			templateContent: ssr.ssr,
 		}),
+		new HtmlWebpackHarddiskPlugin(),
 		new webpack.EnvironmentPlugin({
 			LIL_GUI: "true",
 		}),

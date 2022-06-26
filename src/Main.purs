@@ -2,9 +2,9 @@ module Main where
 
 import Prelude
 
-import Deku.Toplevel (runInBody)
+import Deku.Toplevel (hydrate)
 import Effect (Effect)
 import Parser.Main as Parser
 
 main :: Effect Unit
-main = runInBody Parser.main
+main = hydrate Parser.main

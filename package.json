@@ -18,6 +18,7 @@
 		"babel-loader": "^8.2.5",
 		"css-loader": "^6.7.1",
 		"esbuild": "^0.14.43",
+		"html-webpack-harddisk-plugin": "^2.0.0",
 		"html-webpack-plugin": "^5.5.0",
 		"postcss": "^8.4.13",
 		"postcss-loader": "^6.2.1",
