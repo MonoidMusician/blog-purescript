@@ -59,7 +59,7 @@ import Effect.Class.Console as Log
 import Effect.Now (now)
 import Effect.Unsafe (unsafePerformEffect)
 import FRP.Behavior (step)
-import FRP.Event (class IsEvent, AnEvent, bang, filterMap, fold, fromEvent, keepLatest, mapAccum, memoize, sampleOn, subscribe, sweep, toEvent, withLast)
+import FRP.Event (class IsEvent, AnEvent, bang, create, filterMap, fix, fold, fromEvent, keepLatest, makeEvent, mapAccum, memoize, sampleOn, subscribe, sweep, toEvent, withLast)
 import FRP.Event.AnimationFrame (animationFrame)
 import FRP.Event.Class (biSampleOn)
 import FRP.Event.Time (withTime)
@@ -72,6 +72,7 @@ import Parser.Proto as Proto
 import Parser.ProtoG8 as G8
 import Partial.Unsafe (unsafeCrashWith, unsafePartial)
 import Type.Proxy (Proxy(..))
+import Unsafe.Coerce (unsafeCoerce)
 import Web.Event.Event (target)
 import Web.HTML.HTMLInputElement (fromEventTarget, value)
 
@@ -946,6 +947,38 @@ stepByStep start index cb =
 debug :: forall m a. Show a => String -> AnEvent m a -> AnEvent m a
 debug tag = map \a -> unsafePerformEffect (a <$ (Log.info (tag <> show a)))
 
+debugMsg :: forall m a. String -> AnEvent m a -> AnEvent m a
+debugMsg tag = map \a -> unsafePerformEffect (a <$ (Log.info (unsafeCoerce [tag, unsafeCoerce a])))
+
+-- Sort of a nested fix: runs `keepLatest` for the inputs and outputs returned
+-- from the event returned from the function.
+fixE :: forall m s i o. MonadST s m => Monad m => (AnEvent m i -> AnEvent m { input :: AnEvent m i, output :: AnEvent m o }) -> AnEvent m o
+fixE f =
+  makeEvent \k -> do
+    { event, push } <- create
+    inputsE <- create
+    outputsE <- create
+    -- Note: to catch `bang` events, we need to subscribe to `input` and `output`
+    -- before subscribing to `f event`!
+    -- But `bang` events on `input` still do not get passed through to `f`
+    -- because it probably does not have a subscription to pull from yet.
+    let input = keepLatest inputsE.event
+    let output = keepLatest outputsE.event
+    c1 <- subscribe input push
+    c2 <- subscribe output k
+    -- We subscribe manually just to ensure it is only one subscription
+    -- otherwise it could be implemented as
+    -- `input = keepLatest (f event <#> _.input)` etc.
+    c0 <- subscribe (f event) \latest -> do
+      inputsE.push latest.input
+      outputsE.push latest.output
+    pure (c1 *> c2 *> c0)
+--------------------------------------------------------------------------------
+
+
+
+
+
 type ListicleEvent a = Variant (add :: a, remove :: Int)
 
 -- | Render a list of items, with begin, end, separator elements and finalize button
@@ -960,7 +993,7 @@ listicle
    . Korok s m
   => Show a
   => { initial :: Array a -- initial value
-     , addEvent :: AnEvent m a -- external add events
+     , addEvent :: AnEvent m (Array a) -> AnEvent m a -- external add events
 
      , remove :: Maybe (Effect Unit -> Domable m lock payload) -- remove button
      , finalize :: Maybe (AnEvent m (Array a) -> Domable m lock payload) -- finalize button
@@ -971,9 +1004,12 @@ listicle
      , separator :: Maybe (Domable m lock payload)
      }
   -> ComponentSpec m lock payload (Array a)
-listicle desc = keepLatest $ bus \pushRemove removesEvent ->
+listicle desc = keepLatest $ bus \pushRemove removesEvent -> fixE \valueFix ->
+  -- See note above: even though the event being fixed has a `bang`, it doesn't
+  -- reach the `addEvent` because it won't be subscribed yet.
+  keepLatest $ memoize (desc.addEvent (bang desc.initial <|> valueFix)) \addEventFix ->
   let
-    addEvent = counter desc.addEvent <#> \(v /\ i) -> (i + Array.length desc.initial) /\ v
+    addEvent = counter addEventFix <#> \(v /\ i) -> (i + Array.length desc.initial) /\ v
     initialEvent = oneOfMap bang initialValue
 
     initialValue :: Array (Int /\ a)
@@ -1039,8 +1075,10 @@ listicle desc = keepLatest $ bus \pushRemove removesEvent ->
                 ) <|> filter (eq idx) removesEvent $> remove
           in
             intro <> [ D.span_ [ dyn renderItems ] ] <> extro <> fin
+
+        value = map snd <$> currentValue
       in
-        { element, value: map snd <$> currentValue }
+        { input: value, output: bang { element, value } }
 
 -- | Abstract component
 type ComponentSpec m lock payload d =
@@ -1094,7 +1132,9 @@ stateComponent = bussed \addNew addEvent ->
       , renderItem: text_ <<< show
       , remove: Just \rem -> D.button (D.OnClick !:= rem) [ text_ "-" ]
       , finalize: Nothing
-      , addEvent: addEvent
+      , addEvent: \currentValue -> filterMap identity $
+          sampleOn (debug "cv " currentValue) $ addEvent <#> \adding current ->
+            if Array.elem adding current then Nothing else Just adding
       , initial: [ 0, 1, 2 ]
       }
   in
