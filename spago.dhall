@@ -39,6 +39,7 @@ to generate this file without the comments in this block.
   , "lists"
   , "maybe"
   , "newtype"
+  , "nonempty"
   , "now"
   , "numbers"
   , "ordered-collections"
